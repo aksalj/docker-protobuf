@@ -1,12 +1,12 @@
-FROM alpine:3.8 as protoc_builder
-RUN apk add --no-cache build-base curl automake autoconf libtool git zlib-dev
+FROM alpine:3.12 as protoc_builder
+RUN apk add --no-cache build-base curl automake autoconf libtool git zlib-dev linux-headers
 
-ENV GRPC_VERSION=1.16.0 \
-        GRPC_JAVA_VERSION=1.16.1 \
-        GRPC_WEB_VERSION=1.0.0 \
-        PROTOBUF_VERSION=3.6.1 \
-        PROTOBUF_C_VERSION=1.3.1 \
-        PROTOC_GEN_DOC_VERSION=1.1.0 \
+ENV GRPC_VERSION=1.31.0 \
+        GRPC_JAVA_VERSION=1.31.1\
+        GRPC_WEB_VERSION=1.2.0 \
+        PROTOBUF_VERSION=3.12.4 \
+        PROTOBUF_C_VERSION=1.3.3 \
+        PROTOC_GEN_DOC_VERSION=1.3.2 \
         OUTDIR=/out
 RUN mkdir -p /protobuf && \
         curl -L https://github.com/google/protobuf/archive/v${PROTOBUF_VERSION}.tar.gz | tar xvz --strip-components=1 -C /protobuf
@@ -37,8 +37,8 @@ RUN cd /protobuf-c && \
         make -j2
 RUN cd /protobuf && \
         make install DESTDIR=${OUTDIR}
-RUN cd /grpc && \
-        make install-plugins prefix=${OUTDIR}/usr
+RUN cd /grpc && cp -r bins/opt/* ${OUTDIR}/usr/bin
+# make install-plugins prefix=${OUTDIR}/usr
 RUN cd /grpc-java/compiler/src/java_plugin/cpp && \
         install -c protoc-gen-grpc-java ${OUTDIR}/usr/bin/
 RUN cd /grpc-web/javascript/net/grpc/web && \
@@ -50,27 +50,28 @@ RUN find ${OUTDIR} -name "*.a" -delete -or -name "*.la" -delete
 
 RUN apk add --no-cache go
 ENV GOPATH=/go \
-        PATH=/go/bin/:$PATH
-RUN go get -u -v -ldflags '-w -s' \
-        github.com/Masterminds/glide \
-        github.com/golang/protobuf/protoc-gen-go \
-        github.com/gogo/protobuf/protoc-gen-gofast \
-        github.com/gogo/protobuf/protoc-gen-gogo \
-        github.com/gogo/protobuf/protoc-gen-gogofast \
-        github.com/gogo/protobuf/protoc-gen-gogofaster \
-        github.com/gogo/protobuf/protoc-gen-gogoslick \
-        github.com/twitchtv/twirp/protoc-gen-twirp \
-        github.com/chrusty/protoc-gen-jsonschema \
-        github.com/grpc-ecosystem/grpc-gateway/protoc-gen-swagger \
-        github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway \
-        github.com/johanbrandhorst/protobuf/protoc-gen-gopherjs \
-        github.com/ckaznocha/protoc-gen-lint \
-        github.com/mwitkow/go-proto-validators/protoc-gen-govalidators \
-        github.com/lyft/protoc-gen-validate \
-        moul.io/protoc-gen-gotemplate \
-        github.com/micro/protoc-gen-micro \
-        && (cd ${GOPATH}/src/github.com/lyft/protoc-gen-validate && make build) \
-        && install -c ${GOPATH}/bin/protoc-gen* ${OUTDIR}/usr/bin/
+        PATH=/go/bin/:$PATH \
+        GO111MODULE=on
+RUN go get github.com/golang/protobuf/protoc-gen-go
+RUN cp -r ${GOPATH}/bin/protoc-gen* ${OUTDIR}/usr/bin/
+# RUN go get -u -v -ldflags '-w -s' \
+#         github.com/Masterminds/glide \
+#         github.com/golang/protobuf/protoc-gen-go \
+#         github.com/gogo/protobuf/protoc-gen-gofast \
+#         github.com/gogo/protobuf/protoc-gen-gogo \
+#         github.com/gogo/protobuf/protoc-gen-gogofast \
+#         github.com/gogo/protobuf/protoc-gen-gogofaster \
+#         github.com/gogo/protobuf/protoc-gen-gogoslick \
+#         github.com/twitchtv/twirp/protoc-gen-twirp \
+#         github.com/chrusty/protoc-gen-jsonschema \
+#         github.com/grpc-ecosystem/grpc-gateway/protoc-gen-swagger \
+#         github.com/grpc-ecosystem/grpc-gateway/protoc-gen-grpc-gateway \
+#         github.com/johanbrandhorst/protobuf/protoc-gen-gopherjs \
+#         github.com/ckaznocha/protoc-gen-lint \
+#         github.com/mwitkow/go-proto-validators/protoc-gen-govalidators \
+#         moul.io/protoc-gen-gotemplate \
+#         github.com/micro/protoc-gen-micro \
+#         && install -c ${GOPATH}/bin/protoc-gen* ${OUTDIR}/usr/bin/
 
 RUN mkdir -p ${GOPATH}/src/github.com/pseudomuto/protoc-gen-doc && \
         curl -L https://github.com/pseudomuto/protoc-gen-doc/archive/v${PROTOC_GEN_DOC_VERSION}.tar.gz | tar xvz --strip 1 -C ${GOPATH}/src/github.com/pseudomuto/protoc-gen-doc
@@ -121,33 +122,26 @@ RUN find /protoc-gen-javalite/ -name 'lib*.so*' -exec patchelf --set-rpath /prot
         done
 
 
-FROM rust:1.22.1 as rust_builder
-ENV RUST_PROTOBUF_VERSION=1.4.3 \
-        OUTDIR=/out
-RUN mkdir -p ${OUTDIR}
-RUN apt-get update && \
-        apt-get install -y musl-tools
-RUN rustup target add x86_64-unknown-linux-musl
-RUN mkdir -p /rust-protobuf && \
-        curl -L https://github.com/stepancheg/rust-protobuf/archive/v${RUST_PROTOBUF_VERSION}.tar.gz | tar xvz --strip 1 -C /rust-protobuf
-RUN cd /rust-protobuf/protobuf && \
-        RUSTFLAGS='-C linker=musl-gcc' cargo build --target=x86_64-unknown-linux-musl --release
-RUN mkdir -p ${OUTDIR}/usr/bin && \
-        strip /rust-protobuf/target/x86_64-unknown-linux-musl/release/protoc-gen-rust && \
-        install -c /rust-protobuf/target/x86_64-unknown-linux-musl/release/protoc-gen-rust ${OUTDIR}/usr/bin/
+# FROM rust:1.22.1 as rust_builder
+# ENV RUST_PROTOBUF_VERSION=1.4.3 \
+#         OUTDIR=/out
+# RUN mkdir -p ${OUTDIR}
+# RUN apt-get update && \
+#         apt-get install -y musl-tools
+# RUN rustup target add x86_64-unknown-linux-musl
+# RUN mkdir -p /rust-protobuf && \
+#         curl -L https://github.com/stepancheg/rust-protobuf/archive/v${RUST_PROTOBUF_VERSION}.tar.gz | tar xvz --strip 1 -C /rust-protobuf
+# RUN cd /rust-protobuf/protobuf && \
+#         RUSTFLAGS='-C linker=musl-gcc' cargo build --target=x86_64-unknown-linux-musl --release
+# RUN mkdir -p ${OUTDIR}/usr/bin && \
+#         strip /rust-protobuf/target/x86_64-unknown-linux-musl/release/protoc-gen-rust && \
+#         install -c /rust-protobuf/target/x86_64-unknown-linux-musl/release/protoc-gen-rust ${OUTDIR}/usr/bin/
 
 
-FROM znly/upx as packer
-COPY --from=protoc_builder /out/ /out/
-RUN upx --lzma \
-        /out/usr/bin/protoc \
-        /out/usr/bin/grpc_* \
-        /out/usr/bin/protoc-gen-*
-
-FROM alpine:3.7
+FROM alpine:3.12
 RUN apk add --no-cache libstdc++
-COPY --from=packer /out/ /
-COPY --from=rust_builder /out/ /
+COPY --from=protoc_builder /out /
+# COPY --from=rust_builder /out/ /
 COPY --from=swift_builder /protoc-gen-swift /protoc-gen-swift
 RUN for p in protoc-gen-swift protoc-gen-swiftgrpc; do \
         ln -s /protoc-gen-swift/${p} /usr/bin/${p}; \
@@ -168,11 +162,6 @@ RUN apk add --no-cache curl && \
         curl -L -o /protobuf/github.com/gogo/protobuf/gogoproto/gogo.proto https://raw.githubusercontent.com/gogo/protobuf/master/gogoproto/gogo.proto && \
         mkdir -p /protobuf/github.com/mwitkow/go-proto-validators && \
         curl -L -o /protobuf/github.com/mwitkow/go-proto-validators/validator.proto https://raw.githubusercontent.com/mwitkow/go-proto-validators/master/validator.proto && \
-        mkdir -p /protobuf/github.com/lyft/protoc-gen-validate/gogoproto && \
-        mkdir -p /protobuf/github.com/lyft/protoc-gen-validate/validate && \
-        curl -L -o /protobuf/github.com/lyft/protoc-gen-validate/gogoproto/gogo.proto https://raw.githubusercontent.com/lyft/protoc-gen-validate/master/gogoproto/gogo.proto && \
-        curl -L -o /protobuf/github.com/lyft/protoc-gen-validate/validate/validate.proto https://raw.githubusercontent.com/lyft/protoc-gen-validate/master/validate/validate.proto && \
-        apk del curl && \
-        chmod a+x /usr/bin/protoc
+        apk del curl
 
 ENTRYPOINT ["/usr/bin/protoc", "-I/protobuf"]
